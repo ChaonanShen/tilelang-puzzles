@@ -81,7 +81,44 @@ def tl_scalar_flash_attn(Q, K, V, BLOCK_B: int, BLOCK_S: int):
     V: T.Tensor((B, S), dtype)
     O = T.empty((B, S), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(B, BLOCK_B), threads=256) as bx:
+        bidx = bx * BLOCK_B 
+
+        r_max = T.alloc_fragment((BLOCK_B,), dtype)
+        r_sum = T.alloc_fragment((BLOCK_B,), dtype)
+        T.fill(r_max, float('-inf'))
+        T.fill(r_sum, 0)
+
+        r_q = T.alloc_fragment((BLOCK_B, BLOCK_S), dtype)
+        r_k = T.alloc_fragment((BLOCK_B, BLOCK_S), dtype)
+        r_v = T.alloc_fragment((BLOCK_B, BLOCK_S), dtype)
+        r_tmp = T.alloc_fragment((BLOCK_B, BLOCK_S), dtype)
+
+        # 第一轮循环，计算QK和MAX，r_tmp记录QK
+        for s in T.Serial(T.ceildiv(S, BLOCK_S)):
+            T.copy(Q[bidx, s*BLOCK_S], r_q)
+            T.copy(K[bidx, s*BLOCK_S], r_k)
+            for i, j in T.Parallel(BLOCK_B, BLOCK_S):
+                r_tmp[i, j] = r_q[i, j] * r_k[i, j]
+            T.reduce_max(r_tmp, r_max, dim=1, clear=False)   
+            T.copy(r_tmp, O[bidx, s*BLOCK_S]) 
+
+
+        # 第二轮循环，计算P和SUM，r_tmp记录P
+        for s in T.Serial(T.ceildiv(S, BLOCK_S)):
+            T.copy(O[bidx, s*BLOCK_S], r_tmp)
+            for i, j in T.Parallel(BLOCK_B, BLOCK_S):
+                r_tmp[i, j] = T.exp(r_tmp[i, j] - r_max[i])
+            T.reduce_sum(r_tmp, r_sum, dim=1, clear=False)
+            T.copy(r_tmp, O[bidx, s*BLOCK_S])
+
+        # 第三轮循环
+        for s in T.Serial(T.ceildiv(S, BLOCK_S)):
+            T.copy(O[bidx, s*BLOCK_S], r_tmp)
+            T.copy(V[bidx, s*BLOCK_S], r_v)
+            for i, j in T.Parallel(BLOCK_B, BLOCK_S):
+                r_tmp[i, j] = r_tmp[i, j] / r_sum[i] * r_v[i, j]
+            T.copy(r_tmp, O[bidx, s*BLOCK_S])
 
     return O
 
