@@ -71,7 +71,7 @@ def tl_reduce_sum(A, BLOCK_N: int, BLOCK_M: int):
         T.clear(r_b)
 
         # 一个block处理一个tile，每个tile逐块累加
-        for k in T.serial(T.ceildiv(M, BLOCK_M)):
+        for k in T.Serial(T.ceildiv(M, BLOCK_M)):
             T.copy(A[nidx, k*BLOCK_M], r_a)
             T.reduce_sum(r_a, r_b, dim=1, clear=False)
 

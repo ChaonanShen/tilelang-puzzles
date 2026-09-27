@@ -83,7 +83,35 @@ def tl_softmax(A, BLOCK_N: int, BLOCK_M: int):
     A: T.Tensor((N, M), dtype)
     B = T.empty((N, M), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(N, BLOCK_N), threads=256) as bx:
+        nidx = bx * BLOCK_N 
+
+        r_a = T.alloc_fragment((BLOCK_N, BLOCK_M), dtype)
+        r_max = T.alloc_fragment((BLOCK_N,), dtype)
+        r_sum = T.alloc_fragment((BLOCK_N,), dtype)
+
+        T.fill(r_max, float('-inf'))
+        T.fill(r_sum, 0)
+
+        # 找到max
+        for k in T.Serial(T.ceildiv(M, BLOCK_M)):
+            T.copy(A[nidx, k*BLOCK_M], r_a)
+            T.reduce_max(r_a, r_max, dim=1, clear=False)
+
+        # 逐个修正和计算sum
+        for k in T.Serial(T.ceildiv(M, BLOCK_M)):
+            T.copy(A[nidx, k*BLOCK_M], r_a)
+            for i, j in T.Parallel(BLOCK_N, BLOCK_M):
+                r_a[i, j] = T.exp(r_a[i, j] - r_max[i])
+            T.reduce_sum(r_a, r_sum, dim=1, clear=False)
+            T.copy(r_a, B[nidx, k*BLOCK_M])
+
+        # 除以sum
+        for k in T.Serial(T.ceildiv(M, BLOCK_M)):
+            T.copy(B[nidx, k*BLOCK_M], r_a)
+            for i, j in T.Parallel(BLOCK_N, BLOCK_M):
+                r_a[i, j] /= r_sum[i]
+            T.copy(r_a, B[nidx, k*BLOCK_M])
 
     return B
 
