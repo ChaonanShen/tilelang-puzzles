@@ -54,7 +54,20 @@ def tl_mul_relu_bcast(A, B, BLOCK_N: int, BLOCK_M: int):
     B: T.Tensor((M,), dtype)
     C = T.empty((N, M), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(M, BLOCK_M), T.ceildiv(N, BLOCK_N), threads=256) as (bx, by):
+        rowIdx = by * BLOCK_N 
+        colIdx = bx * BLOCK_M
+        sa = T.alloc_fragment((BLOCK_N, BLOCK_M), dtype)
+        sb = T.alloc_fragment((BLOCK_M), dtype)
+        sc = T.alloc_fragment((BLOCK_N, BLOCK_M), dtype)
+
+        T.copy(A[rowIdx, colIdx], sa)
+        T.copy(B[colIdx], sb)
+
+        for i, j in T.Parallel(BLOCK_N, BLOCK_M):
+            sc[i, j] = T.max(sa[i, j] * sb[j], 0)
+
+        T.copy(sc, C[rowIdx, colIdx])
 
     return C
 
@@ -128,7 +141,23 @@ def tl_mul_relu_bwd(A, B, dC, BLOCK_N: int, BLOCK_M: int):
     dC: T.Tensor((N, M), dtype)
     dA = T.empty((N, M), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(M, BLOCK_M), T.ceildiv(N, BLOCK_N), threads=256) as (bx, by):
+        rowIdx = by * BLOCK_N 
+        colIdx = bx * BLOCK_M 
+
+        r_a = T.alloc_shared((BLOCK_N, BLOCK_M), dtype)
+        r_b = T.alloc_shared((BLOCK_M), dtype)
+        r_dc = T.alloc_shared((BLOCK_N, BLOCK_M), dtype)
+        r_da = T.alloc_fragment((BLOCK_N, BLOCK_M), dtype)
+
+        T.copy(A[rowIdx, colIdx], r_a)
+        T.copy(B[colIdx], r_b)
+        T.copy(dC[rowIdx, colIdx], r_dc)
+
+        for i, j in T.Parallel(BLOCK_N, BLOCK_M):
+            r_da[i, j] = T.if_then_else(r_a[i, j] * r_b[j] > 0, r_dc[i, j] * r_b[j], 0)
+
+        T.copy(r_da, dA[rowIdx, colIdx])
 
     return dA
 
