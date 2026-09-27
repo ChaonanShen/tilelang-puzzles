@@ -79,9 +79,8 @@ def tl_copy_1d_serial(A):
     return B
 
 
-def run_copy_1d_serial():
+def run_copy_1d_serial(N: int):
     print("\n=== Copy 1D Serial ===\n")
-    N = 1024
     test_puzzle(tl_copy_1d_serial, ref_copy_1d, {"N": N})
 
 
@@ -104,14 +103,14 @@ def tl_copy_1d_multi_threads(A):
     A: T.Tensor((N,), T.float16)
     B = T.empty((N,), T.float16)
 
-    # TODO: Implement this function
+    with T.Kernel(1, threads=128) as _:
+        T.copy(A, B)
 
     return B
 
 
-def run_copy_1d_multi_threads():
+def run_copy_1d_multi_threads(N: int):
     print("\n=== Copy 1D Multi-threads ===\n")
-    N = 1024 * 256
 
     test_puzzle(tl_copy_1d_multi_threads, ref_copy_1d, {"N": N})
 
@@ -151,14 +150,14 @@ def tl_copy_1d_parallel(A, BLOCK_N: int):
     A: T.Tensor((N,), T.float16)
     B = T.empty((N,), T.float16)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(N, BLOCK_N), threads=128) as bx:
+        T.copy(A[bx*BLOCK_N : (bx+1)*BLOCK_N], B[bx*BLOCK_N : (bx+1)*BLOCK_N])
 
     return B
 
 
-def run_copy_1d_parallel():
+def run_copy_1d_parallel(N: int):
     print("\n=== Copy 1D Parallel ===\n")
-    N = 1024 * 256
     BLOCK_N = 1024
     test_puzzle(tl_copy_1d_parallel, ref_copy_1d, {"N": N, "BLOCK_N": BLOCK_N})
     bench_puzzle(
@@ -171,6 +170,41 @@ def run_copy_1d_parallel():
 
 
 if __name__ == "__main__":
-    run_copy_1d_serial()
-    run_copy_1d_multi_threads()
-    run_copy_1d_parallel()
+    # serial 是单 block 单线程，没有 layout inference 限制，可以测极小值
+    serial_sizes = [
+        1,              # 极小，只有 serial 能跑
+        1024,
+        1000,
+        1025,
+        1024 * 256,
+        1024 * 1024,
+        3000,
+    ]
+
+    # multi_threads 单 block 128 线程，N 至少要够 128 线程分，上限也不能太大
+    multi_thread_sizes = [
+        1024,
+        1000,
+        1025,
+        3000,
+        1024 * 256,
+    ]
+
+    # parallel 多 block，能扩展到大 N，但同样不能测 N=1
+    parallel_sizes = [
+        1024,
+        1000,
+        1025,
+        1024 * 256,
+        1024 * 1024,
+        3000,
+    ]
+
+    for N in serial_sizes:
+        run_copy_1d_serial(N)
+
+    for N in multi_thread_sizes:
+        run_copy_1d_multi_threads(N)
+
+    for N in parallel_sizes:
+        run_copy_1d_parallel(N)
