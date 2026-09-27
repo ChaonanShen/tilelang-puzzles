@@ -82,19 +82,42 @@ def tl_reduce_sum(A, BLOCK_N: int, BLOCK_M: int):
 
 def run_reduce_sum():
     print("\n=== Reduce Sum ===\n")
-    N = 4096
-    M = 16384
+
     BLOCK_N = 16
     BLOCK_M = 128
-    test_puzzle(
-        tl_reduce_sum,
-        ref_reduce_sum,
-        {"N": N, "M": M, "BLOCK_N": BLOCK_N, "BLOCK_M": BLOCK_M},
-    )
+
+    # 覆盖：正常大值、不整除 N、不整除 M、两者都不整除、边界小值
+    test_cases = [
+        (4096, 16384),   # 基准，完全整除
+        (4000, 16384),   # N 不整除 BLOCK_N
+        (4096, 16000),   # M 不整除 BLOCK_M
+        (4000, 16000),   # N、M 都不整除
+        (1,    1),       # 最小边界
+        (1,    16384),   # N=1，M 最大
+        (4096, 1),       # N 最大，M=1
+        (16,   128),     # 刚好一个 block
+        (17,   129),     # 比一个 block 多一点
+        (100,  300),     # 中等大小，两者都不整除
+    ]
+
+    for N, M in test_cases:
+        print(f"  Testing N={N}, M={M} ...")
+        try:
+            test_puzzle(
+                tl_reduce_sum,
+                ref_reduce_sum,
+                {"N": N, "M": M, "BLOCK_N": BLOCK_N, "BLOCK_M": BLOCK_M},
+            )
+            print(f"    PASSED")
+        except Exception as e:
+            print(f"    FAILED: {e}")
+
+    # bench 只跑一次大 case
+    print("\n--- Benchmark (N=4096, M=16384) ---")
     bench_puzzle(
         tl_reduce_sum,
         ref_reduce_sum,
-        {"N": N, "M": M, "BLOCK_N": BLOCK_N, "BLOCK_M": BLOCK_M},
+        {"N": 4096, "M": 16384, "BLOCK_N": BLOCK_N, "BLOCK_M": BLOCK_M},
         bench_torch=True,
     )
 
