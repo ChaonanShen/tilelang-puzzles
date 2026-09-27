@@ -62,7 +62,25 @@ def tl_gemv(A, B, BLOCK_M: int, BLOCK_K: int):
     B: T.Tensor((K,), dtype)
     C = T.empty((M,), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(M, BLOCK_M), threads=256) as bx:
+        midx = bx * BLOCK_M 
+
+        ra = T.alloc_fragment((BLOCK_M, BLOCK_K), dtype)
+        rb = T.alloc_fragment((BLOCK_K,), dtype)
+        rc = T.alloc_fragment((BLOCK_M,), accum_dtype)
+        r_tmp = T.alloc_fragment((BLOCK_M, BLOCK_K), accum_dtype) # 先各自乘，之后reduce
+
+        T.clear(rc)
+
+        for k in T.Serial(T.ceildiv(K, BLOCK_K)):
+            kidx = k * BLOCK_K
+            T.copy(A[midx, kidx], ra)
+            T.copy(B[kidx], rb)
+            for i, j in T.Parallel(BLOCK_M, BLOCK_K):
+                r_tmp[i, j] = T.cast(ra[i, j], T.float32) * T.cast(rb[j], T.float32)
+            T.reduce_sum(r_tmp, rc, dim=1, clear=False)
+
+        T.copy(rc, C[midx:midx+BLOCK_M])
     
     return C
 
@@ -143,7 +161,20 @@ def tl_matmul_naive(A, B, BLOCK_M: int, BLOCK_N: int, BLOCK_K: int):
     B: T.Tensor((K, N), dtype)
     C = T.empty((M, N), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(M, BLOCK_M), T.ceildiv(N, BLOCK_N), threads=256) as (bx, by):
+        # ra/rb如果也放在寄存器上，压力其实很大，这种线程间共享的最好放到shared mem
+        ra = T.alloc_fragment((BLOCK_M, BLOCK_K), dtype)
+        rb = T.alloc_fragment((BLOCK_K, BLOCK_N), dtype)
+        rc = T.alloc_fragment((BLOCK_M, BLOCK_N), accum_dtype)
+        T.clear(rc)
+
+        midx, nidx = bx * BLOCK_M, by * BLOCK_N 
+        for k in T.Serial(T.ceildiv(K, BLOCK_K)):
+            kidx = k * BLOCK_K
+            T.copy(A[midx, kidx], ra)
+            T.copy(B[kidx, nidx], rb)
+            T.gemm(ra, rb, rc)
+        T.copy(rc, C[midx, nidx])
 
     return C
 
@@ -217,7 +248,19 @@ def tl_matmul_opt(A, B, BLOCK_M: int, BLOCK_N: int, BLOCK_K: int):
     B: T.Tensor((K, N), dtype)
     C = T.empty((M, N), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(M, BLOCK_M), T.ceildiv(N, BLOCK_N), threads=256) as (bx, by):
+        sa = T.alloc_shared((BLOCK_M, BLOCK_K), dtype)
+        sb = T.alloc_shared((BLOCK_K, BLOCK_N), dtype)
+        rc = T.alloc_fragment((BLOCK_M, BLOCK_N), accum_dtype)
+        T.clear(rc)
+
+        midx, nidx = bx * BLOCK_M, by * BLOCK_N 
+        for k in T.Pipelined(T.ceildiv(K, BLOCK_K), num_stages=3):
+            kidx = k * BLOCK_K
+            T.copy(A[midx, kidx], sa)
+            T.copy(B[kidx, nidx], sb)
+            T.gemm(sa, sb, rc)
+        T.copy(rc, C[midx, nidx])
 
     return C
 
