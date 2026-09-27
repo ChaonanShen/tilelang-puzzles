@@ -50,7 +50,7 @@ def tl_add_1d(A, B, BLOCK_N: int):
     B: T.Tensor((N,), T.float16)
     C = T.empty((N,), T.float16)
 
-    with T.Kernel(N // BLOCK_N, threads=256) as bx:
+    with T.Kernel(T.ceildiv(N, BLOCK_N), threads=256) as bx:
         base_idx = bx * BLOCK_N
         for i in T.Parallel(BLOCK_N):
             C[base_idx + i] = A[base_idx + i] + B[base_idx + i]
@@ -105,7 +105,11 @@ def tl_mul_relu_1d(A, B, BLOCK_N: int):
     B: T.Tensor((N,), T.float16)
     C = T.empty((N,), T.float16)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(N, BLOCK_N), threads=256) as bx:
+        base_idx = bx * BLOCK_N 
+        for i in T.Parallel(BLOCK_N):
+            mul = A[base_idx + i] * B[base_idx + i]
+            C[base_idx + i] = T.if_then_else(mul > 0, mul, T.float16(0))
 
     return C
 
@@ -168,7 +172,19 @@ def tl_mul_relu_1d_mem(A, B, BLOCK_N: int):
     B: T.Tensor((N,), dtype)
     C = T.empty((N,), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(N, BLOCK_N), threads=256) as bx:
+        # 使用fragment能触发global memory的向量化加载
+        a_frag = T.alloc_fragment((BLOCK_N,), T.float16)
+        b_frag = T.alloc_fragment((BLOCK_N,), T.float16)
+        c_frag = T.alloc_fragment((BLOCK_N,), T.float16)
+
+        T.copy(A[bx*BLOCK_N:(bx+1)*BLOCK_N], a_frag)
+        T.copy(B[bx*BLOCK_N:(bx+1)*BLOCK_N], b_frag)
+
+        for i in T.Parallel(BLOCK_N):
+            c_frag[i] = T.if_then_else(a_frag[i]*b_frag[i]>0, a_frag[i]*b_frag[i], T.float16(0))
+
+        T.copy(c_frag, C[bx*BLOCK_N:(bx+1)*BLOCK_N])
 
     return C
 
