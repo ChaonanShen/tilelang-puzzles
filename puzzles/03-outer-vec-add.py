@@ -57,7 +57,21 @@ def tl_outer_add(A, B, BLOCK_N: int, BLOCK_M: int):
     B: T.Tensor((M,), dtype)
     C = T.empty((N, M), dtype)
 
-    # TODO: Implement this function
+    with T.Kernel(T.ceildiv(N, BLOCK_N), T.ceildiv(M, BLOCK_M), threads=256) as (bx, by):
+        a_sm = T.alloc_shared((BLOCK_N,), dtype)
+        b_sm = T.alloc_shared((BLOCK_M,), dtype)
+        c_frag = T.alloc_fragment((BLOCK_N, BLOCK_M), dtype)
+
+        T.copy(A[bx*BLOCK_N:(bx+1)*BLOCK_N], a_sm)
+        T.copy(B[by*BLOCK_M:(by+1)*BLOCK_M], b_sm)
+
+        # a_sm/b_sm的加载没有跨线程的依赖，所以不需要
+        # T.sync_threads()
+        
+        for i, j in T.Parallel(BLOCK_N, BLOCK_M):
+            c_frag[i, j] = a_sm[i] + b_sm[j]
+
+        T.copy(c_frag, C[bx*BLOCK_N:(bx+1)*BLOCK_N, by*BLOCK_M:(by+1)*BLOCK_M])
 
     return C
 
